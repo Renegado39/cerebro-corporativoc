@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Plus, Trash2, Save, FileText, Lock } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Plus, Trash2, Save, FileText, Lock, Upload, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 type Document = {
@@ -17,6 +17,8 @@ export default function AdminDashboard() {
     const [documents, setDocuments] = useState<Document[]>([]);
     const [isEditing, setIsEditing] = useState(false);
     const [currentDoc, setCurrentDoc] = useState<Document>({ id: "", title: "", content: "", date: "" });
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Load data from API
     useEffect(() => {
@@ -86,6 +88,44 @@ export default function AdminDashboard() {
         }
     };
 
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (file.type !== "application/pdf") {
+            alert("Por favor sube solo archivos PDF");
+            return;
+        }
+
+        setIsUploading(true);
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+            const res = await fetch("/api/upload", {
+                method: "POST",
+                body: formData,
+            });
+
+            if (!res.ok) throw new Error("Upload failed");
+
+            const data = await res.json();
+
+            setCurrentDoc({
+                id: "",
+                title: file.name.replace(".pdf", ""),
+                content: data.text,
+                date: new Date().toISOString().split('T')[0]
+            });
+            setIsEditing(true);
+        } catch (error) {
+            alert("Error procesando el PDF");
+        } finally {
+            setIsUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+    };
+
     if (!isAuthenticated) {
         return (
             <div className="flex flex-col items-center justify-center min-h-[50vh] w-full max-w-md mx-auto space-y-6">
@@ -132,6 +172,23 @@ export default function AdminDashboard() {
                     <Plus size={18} />
                     Nuevo Documento
                 </button>
+                <div className="relative">
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleFileUpload}
+                        accept=".pdf"
+                        className="hidden"
+                    />
+                    <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-50 text-white dark:text-black rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                        {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                        Subir PDF
+                    </button>
+                </div>
             </div>
 
             <div className="grid gap-4">
