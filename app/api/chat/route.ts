@@ -31,31 +31,29 @@ export async function POST(req: Request) {
             .slice(0, 3)
             .map(item => item.doc);
 
-        // 2. If no context found, return clean message
-        if (relevantDocs.length === 0) {
-            return NextResponse.json({
-                role: "assistant",
-                content: "No encontré información específica en los manuales sobre este tema. Por favor, reformula tu pregunta o contacta a un administrador."
-            });
-        }
+        // 2. Prepare Context for AI (Context might be empty if no matches)
+        const contextText = relevantDocs.length > 0
+            ? relevantDocs.map(d => `--- ${d.title} ---\n${d.content}`).join("\n\n")
+            : "No hay documentos relevantes encontrados para esta consulta.";
 
-        // 3. Prepare Context for AI
-        const contextText = relevantDocs.map(d => `--- ${d.title} ---\n${d.content}`).join("\n\n");
         const systemPrompt = `Eres el Asistente de Conocimiento Corporativo oficial.
-Tus respuestas deben basarse ESTRICTAMENTE en la "Información Corporativa" proporcionada abajo.
-Si la respuesta no está en el texto, di que no tienes esa información.
-Sé amable, profesional y conciso.
+Tus respuestas deben basarse PRINCIPALMENTE en la "Información Corporativa" proporcionada.
 
-Información Corporativa:
+Reglas:
+1. Si el usuario saluda o conversa casualmente, sé amable y profesional (ej: "Hola, ¿en qué puedo ayudarte con los manuales?").
+2. Si hace una pregunta específica sobre la empresa y NO tienes la información en el contexto abajo, di claramente que no está en tus manuales.
+3. No inventes reglas o políticas que no estén en el texto.
+
+Información Corporativa Disponible:
 ${contextText}`;
 
-        // 4. Call OpenAI
+        // 3. Call OpenAI
         const completion = await openai.chat.completions.create({
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: message }
             ],
-            model: "gpt-4o-mini", // Cost-effective and fast
+            model: "gpt-4o-mini",
         });
 
         const aiResponse = completion.choices[0].message.content;
