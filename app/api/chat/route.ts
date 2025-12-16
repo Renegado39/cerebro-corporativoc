@@ -1,53 +1,75 @@
 import { NextResponse } from "next/server";
 import { getDocuments } from "@/lib/storage";
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+});
 
 export async function POST(req: Request) {
     try {
         const { message } = await req.json();
         const docs = await getDocuments();
 
-        // Simple keyword search (Token-based)
+        // 1. Search relevant context (Simple Token-based)
         const lowerMessage = message.toLowerCase().replace(/[^\w\s]/g, "");
         const tokens = lowerMessage.split(/\s+/).filter((t: string) => t.length > 3);
 
-        // Score documents based on token matches
         const scoredDocs = docs.map(doc => {
             let score = 0;
             const text = (doc.title + " " + doc.content).toLowerCase();
-
             tokens.forEach((token: string) => {
                 if (text.includes(token)) score++;
             });
-
             return { doc, score };
         });
 
-        // Filter documents with at least one match and sort by score
+        // Get top 3 most relevant documents
         const relevantDocs = scoredDocs
             .filter(item => item.score > 0)
             .sort((a, b) => b.score - a.score)
+            .slice(0, 3)
             .map(item => item.doc);
 
+        // 2. If no context found, return clean message
         if (relevantDocs.length === 0) {
             return NextResponse.json({
                 role: "assistant",
-                content: "Lo siento, no tengo información sobre ese tema en mis manuales actuales. Por favor consulta con un administrador."
+                content: "No encontré información específica en los manuales sobre este tema. Por favor, reformula tu pregunta o contacta a un administrador."
             });
         }
 
-        // Construct a response based on the top match
-        const topDoc = relevantDocs[0];
+        // 3. Prepare Context for AI
+        const contextText = relevantDocs.map(d => `--- ${d.title} ---\n${d.content}`).join("\n\n");
+        const systemPrompt = `Eres el Asistente de Conocimiento Corporativo oficial.
+Tus respuestas deben basarse ESTRICTAMENTE en la "Información Corporativa" proporcionada abajo.
+Si la respuesta no está en el texto, di que no tienes esa información.
+Sé amable, profesional y conciso.
 
-        // In a real app, we would send 'topDoc.content' + 'message' to OpenAI/Gemini here.
-        // For now, we return a direct excerpt.
-        const responseText = `Basado en el documento "${topDoc.title}", aquí tienes la información relevante:\n\n${topDoc.content.substring(0, 300)}${topDoc.content.length > 300 ? "..." : ""}`;
+Información Corporativa:
+${contextText}`;
+
+        // 4. Call OpenAI
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: message }
+            ],
+            model: "gpt-4o-mini", // Cost-effective and fast
+        });
+
+        const aiResponse = completion.choices[0].message.content;
 
         return NextResponse.json({
             role: "assistant",
-            content: responseText
+            content: aiResponse
         });
 
-    } catch (e) {
-        return NextResponse.json({ role: "assistant", content: "Ocurrió un error procesando tu pregunta." }, { status: 500 });
+    } catch (error) {
+        console.error("OpenAI Error:", error);
+        return NextResponse.json({
+            role: "assistant",
+            content: "Lo siento, hubo un error técnico procesando tu respuesta inteligente."
+        }, { status: 500 });
     }
 }
